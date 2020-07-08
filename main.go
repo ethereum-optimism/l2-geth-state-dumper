@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -57,15 +59,63 @@ func main() {
 	if err != nil {
 		readingGenesisError(err)
 	}
-	applyMessageToState(currentState, defaultDeployerAddress, zeroAddress, gasLimit, genesisInitcode)
-
-	// Now print everything out
-	fmt.Println("\nDUMP INCOMING!")
-	theDump := currentState.RawDump(false, false, false)
-	fmt.Println(theDump.Root)
-	for addr := range theDump.Accounts {
-		fmt.Println("Address:", hex.EncodeToString(addr.Bytes()))
+	// Pull off a deployer address from the args if they care
+	deployerAddress := defaultDeployerAddress
+	if len(os.Args) >= 2 {
+		deployerAddress = common.HexToAddress(os.Args[1])
 	}
+	applyMessageToState(currentState, deployerAddress, zeroAddress, gasLimit, genesisInitcode)
+
+	// Create the dump
+	theDump := currentState.RawDump(false, false, false)
+	fmt.Println("Dump root:", theDump.Root)
+
+	// Convert the dump to change all addresses to be DEAD
+	updatedDump := replaceDumpAddresses(theDump)
+
+	fmt.Println("\nDUMP INCOMING!")
+	marshaledDump, _ := json.Marshal(updatedDump)
+	fmt.Println(common.Bytes2Hex(marshaledDump))
+}
+
+func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
+	// First generate all of the replacement addresses
+	newAddresses := map[common.Address]common.Address{}
+	startingAddress := common.HexToAddress("00000000000000000000000000000000dead0000")
+	idx := int64(0)
+	for addr := range theDump.Accounts {
+		indexAsBytes := make([]byte, 8)
+		binary.LittleEndian.PutUint64(indexAsBytes, uint64(idx))
+		fmt.Println(indexAsBytes)
+
+		newAddr := startingAddress.Bytes()
+
+		for i, theByte := range indexAsBytes[:2] {
+			// for i := 1; i <= len(indexAsBytes); i++ {
+			newAddr[len(newAddr)-i-1] = theByte
+			fmt.Println(newAddr[len(newAddr)-i-1])
+			// newAddr[len(newAddr)-i] = indexAsBytes[len(indexAsBytes)-i]
+		}
+		// Map the old addresses to the new!
+		newAddresses[addr] = common.BytesToAddress(newAddr)
+    fmt.Println("Mapped:", hex.EncodeToString(addr.Bytes()), "to", hex.EncodeToString(newAddresses[addr].Bytes()))
+		idx++
+	}
+
+	// Next populate an updated dump with all the information we want
+	updatedDump.Accounts = map[common.Address]state.DumpAccount{}
+	// Modify the dump to replace addresses with our new addresses
+	for addr, account := range theDump.Accounts {
+		updatedDump.Accounts[newAddresses[addr]] = account
+		for key, value := range account.Storage {
+			fmt.Println("Addr", hex.EncodeToString(addr.Bytes()), "Key: ", hex.EncodeToString(key.Bytes()), "Value", value)
+			if newAddress, found := newAddresses[common.HexToAddress(value)]; found {
+				fmt.Println("Replacing", value, "with", newAddress)
+				account.Storage[key] = newAddress.String()
+			}
+		}
+	}
+	return updatedDump
 }
 
 func applyMessageToState(currentState *state.StateDB, from common.Address, to common.Address, gasLimit uint64, data []byte) ([]byte, uint64, bool, error) {
