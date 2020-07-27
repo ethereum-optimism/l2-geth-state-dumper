@@ -20,6 +20,35 @@ import (
 
 var chainConfig params.ChainConfig
 
+type AddressUpdateMap struct {
+	oldAddressToNewAddress map[common.Address]common.Address
+	newAddressToOldAddress map[common.Address]common.Address
+}
+
+func (a AddressUpdateMap) getNewAddressIfExists(oldAddress common.Address) (common.Address, bool) {
+	newAddr, found := a.oldAddressToNewAddress[oldAddress]
+	return newAddr, found
+}
+
+func (a AddressUpdateMap) getNewAddress(oldAddress common.Address) common.Address {
+	newAddr, _ := a.oldAddressToNewAddress[oldAddress]
+	return newAddr
+}
+
+func (a AddressUpdateMap) associate(oldAddress common.Address, newAddress common.Address) {
+	fmt.Println("Mapping:", hex.EncodeToString(oldAddress.Bytes()), "to", hex.EncodeToString(newAddress.Bytes()))
+	a.oldAddressToNewAddress[oldAddress] = newAddress
+	a.newAddressToOldAddress[newAddress] = oldAddress
+}
+
+func (a AddressUpdateMap) associateExisting(oldAddress common.Address, newAddress common.Address) {
+	fmt.Println("Associating Existing:", hex.EncodeToString(oldAddress.Bytes()), "to", hex.EncodeToString(newAddress.Bytes()))
+	displacedOldAddress := a.newAddressToOldAddress[newAddress]
+	displacedNewAddress := a.oldAddressToNewAddress[oldAddress]
+	a.associate(displacedOldAddress, displacedNewAddress)
+	a.associate(oldAddress, newAddress)
+}
+
 func init() {
 	chainConfig = params.ChainConfig{
 		ChainID:             big.NewInt(1),
@@ -36,6 +65,11 @@ func init() {
 
 var zeroAddress = common.HexToAddress("0000000000000000000000000000000000000000")
 var defaultDeployerAddress = common.HexToAddress("17ec8597ff92C3F44523bDc65BF0f1bE632917ff")
+var expectedExecutionMgrAddress = common.HexToAddress("a193e42526f1fea8c99af609dceabf30c1c29faa")
+var desiredExecutionMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
+var expectedStateMgrAddress = common.HexToAddress("0ddd780a2899b9a6b7acfe5153675cf65c55e03d")
+var desiredStateMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0001")
+var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
 
 const gasLimit = 15000000
 
@@ -59,12 +93,9 @@ func main() {
 	if err != nil {
 		readingGenesisError(err)
 	}
-	// Pull off a deployer address from the args if they care
-	deployerAddress := defaultDeployerAddress
-	if len(os.Args) >= 2 {
-		deployerAddress = common.HexToAddress(os.Args[1])
-	}
-	applyMessageToState(currentState, deployerAddress, zeroAddress, gasLimit, genesisInitcode)
+
+	// Apply to the state
+	applyMessageToState(currentState, defaultDeployerAddress, zeroAddress, gasLimit, genesisInitcode)
 
 	// Create the dump
 	theDump := currentState.RawDump(false, false, false)
@@ -80,36 +111,38 @@ func main() {
 
 func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
 	// First generate all of the replacement addresses
-	newAddresses := map[common.Address]common.Address{}
-	startingAddress := common.HexToAddress("00000000000000000000000000000000dead0000")
+	addressUpdateMap := AddressUpdateMap{
+		newAddressToOldAddress: make(map[common.Address]common.Address),
+		oldAddressToNewAddress: make(map[common.Address]common.Address),
+	}
+
 	idx := int64(0)
-	for addr := range theDump.Accounts {
+	for oldAddr := range theDump.Accounts {
 		indexAsBytes := make([]byte, 8)
 		binary.LittleEndian.PutUint64(indexAsBytes, uint64(idx))
-		fmt.Println(indexAsBytes)
-
-		newAddr := startingAddress.Bytes()
-
+		newAddr := common.BytesToAddress(startingDeadAddress.Bytes())
+		// Replace the bytes in our `newAddr`
 		for i, theByte := range indexAsBytes[:2] {
-			// for i := 1; i <= len(indexAsBytes); i++ {
 			newAddr[len(newAddr)-i-1] = theByte
-			fmt.Println(newAddr[len(newAddr)-i-1])
-			// newAddr[len(newAddr)-i] = indexAsBytes[len(indexAsBytes)-i]
 		}
-		// Map the old addresses to the new!
-		newAddresses[addr] = common.BytesToAddress(newAddr)
-    fmt.Println("Mapped:", hex.EncodeToString(addr.Bytes()), "to", hex.EncodeToString(newAddresses[addr].Bytes()))
+
+		addressUpdateMap.associate(oldAddr, newAddr)
+
 		idx++
 	}
+
+	// Re-associate the ExecutionMgr and StateMgr addresses to always be dead0000 & dead0001
+	addressUpdateMap.associateExisting(expectedExecutionMgrAddress, desiredExecutionMgrAddress)
+	addressUpdateMap.associateExisting(expectedStateMgrAddress, desiredStateMgrAddress)
 
 	// Next populate an updated dump with all the information we want
 	updatedDump.Accounts = map[common.Address]state.DumpAccount{}
 	// Modify the dump to replace addresses with our new addresses
 	for addr, account := range theDump.Accounts {
-		updatedDump.Accounts[newAddresses[addr]] = account
+		updatedDump.Accounts[addressUpdateMap.getNewAddress(addr)] = account
 		for key, value := range account.Storage {
 			fmt.Println("Addr", hex.EncodeToString(addr.Bytes()), "Key: ", hex.EncodeToString(key.Bytes()), "Value", value)
-			if newAddress, found := newAddresses[common.HexToAddress(value)]; found {
+			if newAddress, found := addressUpdateMap.getNewAddressIfExists(common.HexToAddress(value)); found {
 				fmt.Println("Replacing", value, "with", newAddress)
 				account.Storage[key] = newAddress.String()
 			}
@@ -156,7 +189,6 @@ func applyMessageToState(currentState *state.StateDB, from common.Address, to co
 	evm := vm.NewEVM(context, currentState, &chainConfig, vm.Config{})
 
 	returnValue, gasUsed, failed, err := core.ApplyMessage(evm, message, &gasPool)
-	// fmt.Println("Return val:", returnValue, "Gas used:", gasUsed, "Failed:", failed, "Error:", err)
 	fmt.Println("Return val: [HIDDEN]", "Gas used:", gasUsed, "Failed:", failed, "Error:", err)
 
 	commitHash, commitErr := currentState.Commit(false)
