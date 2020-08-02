@@ -25,6 +25,19 @@ type AddressUpdateMap struct {
 	newAddressToOldAddress map[common.Address]common.Address
 }
 
+type SimplifiedTx struct {
+	From string
+	To   string
+	Data string
+}
+
+type GethDumpInput struct {
+	SimplifiedTxs           []SimplifiedTx
+	WalletAddress           string
+	ExecutionManagerAddress string
+	StateManagerAddress     string
+}
+
 func (a AddressUpdateMap) getNewAddressIfExists(oldAddress common.Address) (common.Address, bool) {
 	newAddr, found := a.oldAddressToNewAddress[oldAddress]
 	return newAddr, found
@@ -43,6 +56,10 @@ func (a AddressUpdateMap) associate(oldAddress common.Address, newAddress common
 
 func (a AddressUpdateMap) associateExisting(oldAddress common.Address, newAddress common.Address) {
 	fmt.Println("Associating Existing:", hex.EncodeToString(oldAddress.Bytes()), "to", hex.EncodeToString(newAddress.Bytes()))
+	if _, ok := a.oldAddressToNewAddress[oldAddress]; !ok {
+		fmt.Println("ERROR! Old address not found")
+		os.Exit(1)
+	}
 	displacedOldAddress := a.newAddressToOldAddress[newAddress]
 	displacedNewAddress := a.oldAddressToNewAddress[oldAddress]
 	a.associate(displacedOldAddress, displacedNewAddress)
@@ -64,10 +81,9 @@ func init() {
 }
 
 var zeroAddress = common.HexToAddress("0000000000000000000000000000000000000000")
-var defaultDeployerAddress = common.HexToAddress("17ec8597ff92C3F44523bDc65BF0f1bE632917ff")
-var expectedExecutionMgrAddress = common.HexToAddress("a193e42526f1fea8c99af609dceabf30c1c29faa")
+var expectedExecutionMgrAddress common.Address
 var desiredExecutionMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
-var expectedStateMgrAddress = common.HexToAddress("0ddd780a2899b9a6b7acfe5153675cf65c55e03d")
+var expectedStateMgrAddress common.Address
 var desiredStateMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0001")
 var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
 
@@ -83,19 +99,30 @@ func main() {
 	currentState, _ := state.New(common.Hash{}, db)
 
 	// Now get our initcode!
-	dataStr, err := ioutil.ReadFile("genesisInitcode.hex")
-	if err != nil {
-		readingGenesisError(err)
-	}
-	// Strip newline
-	dataStr = dataStr[:len(dataStr)-1]
-	genesisInitcode, err := hex.DecodeString(string(dataStr))
+	dataStr, err := ioutil.ReadFile("deployment-tx-data.json")
 	if err != nil {
 		readingGenesisError(err)
 	}
 
-	// Apply to the state
-	applyMessageToState(currentState, defaultDeployerAddress, zeroAddress, gasLimit, genesisInitcode)
+	var gethDumpInput GethDumpInput
+
+	err = json.Unmarshal(dataStr, &gethDumpInput)
+
+	deployerAddress := common.HexToAddress(gethDumpInput.WalletAddress)
+	expectedExecutionMgrAddress = common.HexToAddress(gethDumpInput.ExecutionManagerAddress)
+	expectedStateMgrAddress = common.HexToAddress(gethDumpInput.StateManagerAddress)
+
+	// Apply all the transactions to the state
+	for _, simpleTx := range gethDumpInput.SimplifiedTxs {
+		txData, err := hex.DecodeString(string(simpleTx.Data[2:]))
+		if err != nil {
+			readingGenesisError(err)
+		}
+		sender := common.HexToAddress(simpleTx.To)
+
+		// Apply to the state
+		applyMessageToState(currentState, deployerAddress, sender, gasLimit, txData)
+	}
 
 	// Create the dump
 	theDump := currentState.RawDump(false, false, false)
@@ -104,9 +131,12 @@ func main() {
 	// Convert the dump to change all addresses to be DEAD
 	updatedDump := replaceDumpAddresses(theDump)
 
-	fmt.Println("\nDUMP INCOMING!")
+	stateDumpFileName := "state-dump.json"
+	fmt.Println("\nDUMP INCOMING! Sent to:", stateDumpFileName)
 	marshaledDump, _ := json.Marshal(updatedDump)
-	fmt.Println(common.Bytes2Hex(marshaledDump))
+	// fmt.Println(common.Bytes2Hex(marshaledDump))
+	dumpOutput := []byte(common.Bytes2Hex(marshaledDump))
+	ioutil.WriteFile(stateDumpFileName, dumpOutput, 0644)
 }
 
 func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
@@ -143,7 +173,7 @@ func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
 		for key, value := range account.Storage {
 			fmt.Println("Addr", hex.EncodeToString(addr.Bytes()), "Key: ", hex.EncodeToString(key.Bytes()), "Value", value)
 			if newAddress, found := addressUpdateMap.getNewAddressIfExists(common.HexToAddress(value)); found {
-				fmt.Println("Replacing", value, "with", newAddress)
+				fmt.Println("Replacing", value, "with", hex.EncodeToString(newAddress.Bytes()))
 				account.Storage[key] = newAddress.String()
 			}
 		}
