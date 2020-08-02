@@ -131,10 +131,12 @@ func main() {
 	// Convert the dump to change all addresses to be DEAD
 	updatedDump := replaceDumpAddresses(theDump)
 
-	stateDumpFileName := "state-dump.json"
-	fmt.Println("\nDUMP INCOMING! Sent to:", stateDumpFileName)
+	stateDumpFileName := "state-dump.hex"
 	marshaledDump, _ := json.Marshal(updatedDump)
-	// fmt.Println(common.Bytes2Hex(marshaledDump))
+	fmt.Println("\nDUMP INCOMING!")
+	fmt.Println(common.Bytes2Hex(marshaledDump))
+	fmt.Println("\nDUMP PRINTED! Copy sent to:", stateDumpFileName)
+	fmt.Println("To add to L2Geth, copy the dump hex into `ovm_constants.go`")
 	dumpOutput := []byte(common.Bytes2Hex(marshaledDump))
 	ioutil.WriteFile(stateDumpFileName, dumpOutput, 0644)
 }
