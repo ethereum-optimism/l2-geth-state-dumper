@@ -10,6 +10,7 @@ A special purpose geth state dumper which does a couple of strange things:
 This is used for generating the initial OVM state (with an ExecutionManager & StateManager, etc) at specific addresses.
 
 ## Usage
+Tested with `go version go1.14.3 darwin/amd64`
 
 ### Generating State Dump Input (`deployment-tx-data.json`)
 If you want to replace state dump input txs, then you'll need to generate a new `deployment-tx-data.json` file. Do this when you make changes to the ExecutionManager
