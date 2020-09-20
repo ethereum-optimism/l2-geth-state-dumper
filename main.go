@@ -139,7 +139,7 @@ func main() {
 	fmt.Println("Dump root:", theDump.Root)
 
 	// Convert the dump to change all addresses to be DEAD
-	updatedDump = replaceDumpAddresses(theDump)
+	updatedDump := replaceDumpAddresses(theDump)
 
 	l2GethStateDumpFilename := "state-dump.hex"
 	jsonStateDumpFilename := "state-dump.json"
