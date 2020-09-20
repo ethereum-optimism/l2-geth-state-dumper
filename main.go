@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -36,6 +37,7 @@ type GethDumpInput struct {
 	WalletAddress           string
 	ExecutionManagerAddress string
 	StateManagerAddress     string
+	CodeHashes              map[string]string
 }
 
 func (a AddressUpdateMap) getNewAddressIfExists(oldAddress common.Address) (common.Address, bool) {
@@ -87,6 +89,11 @@ var expectedStateMgrAddress common.Address
 var desiredStateMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0001")
 var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
 
+var l2ToL1MessagePasser = common.HexToAddress("4200000000000000000000000000000000000000")
+var l1MessageSender = common.HexToAddress("4200000000000000000000000000000000000001")
+
+var l1CodeHash, l2CodeHash string
+
 const gasLimit = 15000000
 
 func readingGenesisError(err error) {
@@ -112,9 +119,12 @@ func main() {
 	expectedExecutionMgrAddress = common.HexToAddress(gethDumpInput.ExecutionManagerAddress)
 	expectedStateMgrAddress = common.HexToAddress(gethDumpInput.StateManagerAddress)
 
+	l2CodeHash, _ = gethDumpInput.CodeHashes["l2ToL1MessagePasser"]
+	l1CodeHash, _ = gethDumpInput.CodeHashes["l1MessageSender"]
+
 	// Apply all the transactions to the state
 	for _, simpleTx := range gethDumpInput.SimplifiedTxs {
-		txData, err := hex.DecodeString(string(simpleTx.Data[2:]))
+		txData, err := hexutil.Decode(simpleTx.Data)
 		if err != nil {
 			readingGenesisError(err)
 		}
@@ -169,6 +179,15 @@ func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
 	// Re-associate the ExecutionMgr and StateMgr addresses to always be dead0000 & dead0001
 	addressUpdateMap.associateExisting(expectedExecutionMgrAddress, desiredExecutionMgrAddress)
 	addressUpdateMap.associateExisting(expectedStateMgrAddress, desiredStateMgrAddress)
+
+	for address, account := range theDump.Accounts {
+		switch "0x" + account.CodeHash {
+		case l1CodeHash:
+			addressUpdateMap.associateExisting(address, l1MessageSender)
+		case l2CodeHash:
+			addressUpdateMap.associateExisting(address, l2ToL1MessagePasser)
+		}
+	}
 
 	// Next populate an updated dump with all the information we want
 	updatedDump.Accounts = map[common.Address]state.DumpAccount{}
