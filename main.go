@@ -87,7 +87,7 @@ var expectedExecutionMgrAddress common.Address
 var desiredExecutionMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
 var expectedStateMgrAddress common.Address
 var desiredStateMgrAddress = common.HexToAddress("00000000000000000000000000000000dead0001")
-var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000dead0002")
+var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000dead0000")
 
 var l2ToL1MessagePasser = common.HexToAddress("4200000000000000000000000000000000000000")
 var l1MessageSender = common.HexToAddress("4200000000000000000000000000000000000001")
