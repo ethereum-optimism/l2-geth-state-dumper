@@ -70,7 +70,7 @@ func (a AddressUpdateMap) associateExisting(oldAddress common.Address, newAddres
 
 func init() {
 	chainConfig = params.ChainConfig{
-		ChainID:             big.NewInt(1),
+		ChainID:             big.NewInt(420),
 		HomesteadBlock:      new(big.Int),
 		ByzantiumBlock:      new(big.Int),
 		ConstantinopleBlock: new(big.Int),
