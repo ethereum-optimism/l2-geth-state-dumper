@@ -91,8 +91,9 @@ var startingDeadAddress = common.HexToAddress("00000000000000000000000000000000d
 
 var l2ToL1MessagePasser = common.HexToAddress("4200000000000000000000000000000000000000")
 var l1MessageSender = common.HexToAddress("4200000000000000000000000000000000000001")
+var whitelist = common.HexToAddress("4200000000000000000000000000000000000002")
 
-var l1CodeHash, l2CodeHash string
+var l1CodeHash, l2CodeHash, deployerWhitelistCodeHash string
 
 const gasLimit = 15000000
 
@@ -121,6 +122,7 @@ func main() {
 
 	l2CodeHash, _ = gethDumpInput.CodeHashes["l2ToL1MessagePasser"]
 	l1CodeHash, _ = gethDumpInput.CodeHashes["l1MessageSender"]
+	deployerWhitelistCodeHash, _ = gethDumpInput.CodeHashes["deployerWhitelist"]
 
 	// Apply all the transactions to the state
 	for _, simpleTx := range gethDumpInput.SimplifiedTxs {
@@ -186,6 +188,8 @@ func replaceDumpAddresses(theDump state.Dump) (updatedDump state.Dump) {
 			addressUpdateMap.associateExisting(address, l1MessageSender)
 		case l2CodeHash:
 			addressUpdateMap.associateExisting(address, l2ToL1MessagePasser)
+		case deployerWhitelistCodeHash:
+			addressUpdateMap.associateExisting(address, whitelist)
 		}
 	}
 
